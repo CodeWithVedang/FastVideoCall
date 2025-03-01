@@ -27,11 +27,14 @@ const micOnBtn = document.getElementById('micOnBtn');
 const screenShareBtn = document.getElementById('screenShareBtn');
 const stopScreenShareBtn = document.getElementById('stopScreenShareBtn');
 const status = document.getElementById('status');
+const remoteStatus = document.getElementById('remoteStatus');
 
 let localStream;
 let currentCall;
 let peerId;
 let isScreenSharing = false;
+let remoteVideoOn = false;
+let remoteMicOn = false;
 
 // Get URL parameters
 const urlParams = new URLSearchParams(window.location.search);
@@ -44,6 +47,7 @@ navigator.mediaDevices.getUserMedia({
 }).then(stream => {
     localStream = stream;
     localVideo.srcObject = stream;
+    updateButtonStates();
 }).catch(err => {
     console.error('Media error:', err);
     alert('Could not access camera/microphone. Please check permissions.');
@@ -74,6 +78,7 @@ peer.on('call', call => {
         remoteVideo.srcObject = remoteStream;
         status.textContent = 'Connected globally';
         toggleButtons(true);
+        updateRemoteStatus(remoteStream);
     });
     
     call.on('close', () => endCall());
@@ -104,6 +109,7 @@ videoOffBtn.addEventListener('click', () => {
         localStream.getVideoTracks()[0].enabled = false;
         videoOffBtn.style.display = 'none';
         videoOnBtn.style.display = 'inline-block';
+        updateButtonStates();
     }
 });
 
@@ -112,6 +118,7 @@ videoOnBtn.addEventListener('click', () => {
         localStream.getVideoTracks()[0].enabled = true;
         videoOffBtn.style.display = 'inline-block';
         videoOnBtn.style.display = 'none';
+        updateButtonStates();
     }
 });
 
@@ -120,6 +127,7 @@ micOffBtn.addEventListener('click', () => {
         localStream.getAudioTracks()[0].enabled = false;
         micOffBtn.style.display = 'none';
         micOnBtn.style.display = 'inline-block';
+        updateButtonStates();
     }
 });
 
@@ -128,6 +136,7 @@ micOnBtn.addEventListener('click', () => {
         localStream.getAudioTracks()[0].enabled = true;
         micOffBtn.style.display = 'inline-block';
         micOnBtn.style.display = 'none';
+        updateButtonStates();
     }
 });
 
@@ -138,20 +147,25 @@ screenShareBtn.addEventListener('click', async () => {
             audio: true
         });
         
-        localStream.getVideoTracks()[0].stop();
+        // Stop existing video track
+        localStream.getVideoTracks().forEach(track => track.stop());
+        
+        // Replace with screen stream
         localStream = screenStream;
         localVideo.srcObject = screenStream;
         
         if (currentCall) {
-            const videoTrack = screenStream.getVideoTracks()[0];
-            currentCall.peerConnection.getSenders()
-                .find(sender => sender.track.kind === 'video')
-                .replaceTrack(videoTrack);
+            const sender = currentCall.peerConnection.getSenders()
+                .find(s => s.track && s.track.kind === 'video');
+            if (sender) {
+                await sender.replaceTrack(screenStream.getVideoTracks()[0]);
+            }
         }
         
         isScreenSharing = true;
         screenShareBtn.style.display = 'none';
         stopScreenShareBtn.style.display = 'inline-block';
+        updateButtonStates();
         
         screenStream.getVideoTracks()[0].onended = () => stopScreenSharing();
     } catch (err) {
@@ -173,6 +187,7 @@ function joinCall(remoteId) {
         remoteVideo.srcObject = remoteStream;
         status.textContent = 'Connected globally';
         toggleButtons(true);
+        updateRemoteStatus(remoteStream);
     });
     
     call.on('close', () => endCall());
@@ -202,15 +217,17 @@ async function stopScreenSharing() {
     localVideo.srcObject = newStream;
     
     if (currentCall) {
-        const videoTrack = newStream.getVideoTracks()[0];
-        currentCall.peerConnection.getSenders()
-            .find(sender => sender.track.kind === 'video')
-            .replaceTrack(videoTrack);
+        const sender = currentCall.peerConnection.getSenders()
+            .find(s => s.track && s.track.kind === 'video');
+        if (sender) {
+            await sender.replaceTrack(newStream.getVideoTracks()[0]);
+        }
     }
     
     isScreenSharing = false;
     screenShareBtn.style.display = 'inline-block';
     stopScreenShareBtn.style.display = 'none';
+    updateButtonStates();
 }
 
 function endCall() {
@@ -218,6 +235,7 @@ function endCall() {
     currentCall = null;
     remoteVideo.srcObject = null;
     toggleButtons(false);
+    remoteStatus.textContent = 'Not connected';
     if (!joinId) {
         generateLinkBtn.disabled = false;
         linkDisplay.style.display = 'none';
@@ -230,6 +248,38 @@ function endCall() {
 
 function toggleButtons(isCallActive) {
     endBtn.disabled = !isCallActive;
+}
+
+function updateButtonStates() {
+    if (localStream) {
+        const videoEnabled = localStream.getVideoTracks()[0].enabled;
+        videoOffBtn.className = videoEnabled ? 'on' : 'off';
+        videoOnBtn.className = videoEnabled ? 'off' : 'on';
+        
+        const audioEnabled = localStream.getAudioTracks()[0].enabled;
+        micOffBtn.className = audioEnabled ? 'on' : 'off';
+        micOnBtn.className = audioEnabled ? 'off' : 'on';
+        
+        screenShareBtn.className = isScreenSharing ? 'off' : 'on';
+        stopScreenShareBtn.className = isScreenSharing ? 'on' : 'off';
+    }
+}
+
+function updateRemoteStatus(remoteStream) {
+    if (!remoteStream) {
+        remoteStatus.textContent = 'Not connected';
+        return;
+    }
+    
+    remoteVideoOn = remoteStream.getVideoTracks().length > 0 && remoteStream.getVideoTracks()[0].enabled;
+    remoteMicOn = remoteStream.getAudioTracks().length > 0 && remoteStream.getAudioTracks()[0].enabled;
+    
+    remoteStatus.textContent = `Connected - Video: ${remoteVideoOn ? 'On' : 'Off'}, Mic: ${remoteMicOn ? 'On' : 'Off'}`;
+    
+    // Periodically check status
+    setTimeout(() => {
+        if (remoteVideo.srcObject) updateRemoteStatus(remoteVideo.srcObject);
+    }, 1000);
 }
 
 // Handle peer errors
