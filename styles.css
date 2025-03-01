@@ -68,6 +68,22 @@ video {
     object-fit: cover;
 }
 
+.status-section {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.status-section h3 {
+    color: #1a73e8;
+    font-size: 16px;
+    margin-bottom: 5px;
+}
+
+#remoteStatus {
+    font-size: 14px;
+    color: #333;
+}
+
 .controls {
     display: flex;
     justify-content: center;
@@ -79,24 +95,34 @@ button {
     padding: 10px 15px;
     border: none;
     border-radius: 5px;
-    background: #1a73e8;
     color: white;
     cursor: pointer;
     transition: background 0.3s;
     font-size: 16px;
 }
 
-button i {
-    pointer-events: none; /* Prevents icon clicks from interfering */
+/* On state (blue) */
+button.on {
+    background: #1a73e8;
 }
 
-button:hover:not(:disabled) {
-    background: #1557b0;
+/* Off state (red) */
+button.off {
+    background: #e81a1a;
+}
+
+button.on:hover:not(:disabled),
+button.off:hover:not(:disabled) {
+    opacity: 0.9;
 }
 
 button:disabled {
     background: #ccc;
     cursor: not-allowed;
+}
+
+button i {
+    pointer-events: none;
 }
 
 @media (max-width: 600px) {
