@@ -1,4 +1,3 @@
-// Initialize PeerJS with additional configuration for better global connectivity
 const peer = new Peer({
     host: '0.peerjs.com',
     port: 443,
@@ -12,7 +11,7 @@ const peer = new Peer({
             { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }
         ]
     },
-    debug: 2 // Increased logging for debugging
+    debug: 2
 });
 
 const localVideo = document.getElementById('localVideo');
@@ -21,28 +20,27 @@ const generateLinkBtn = document.getElementById('generateLink');
 const linkDisplay = document.getElementById('linkDisplay');
 const copyLinkBtn = document.getElementById('copyLink');
 const endBtn = document.getElementById('endBtn');
+const videoOffBtn = document.getElementById('videoOffBtn');
+const videoOnBtn = document.getElementById('videoOnBtn');
+const micOffBtn = document.getElementById('micOffBtn');
+const micOnBtn = document.getElementById('micOnBtn');
+const screenShareBtn = document.getElementById('screenShareBtn');
+const stopScreenShareBtn = document.getElementById('stopScreenShareBtn');
 const status = document.getElementById('status');
 
 let localStream;
 let currentCall;
 let peerId;
+let isScreenSharing = false;
 
 // Get URL parameters
 const urlParams = new URLSearchParams(window.location.search);
 const joinId = urlParams.get('call');
 
-// Initialize media with better constraints
+// Initialize media
 navigator.mediaDevices.getUserMedia({
-    video: {
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-        frameRate: { ideal: 30 }
-    },
-    audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-    }
+    video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
 }).then(stream => {
     localStream = stream;
     localVideo.srcObject = stream;
@@ -65,7 +63,7 @@ peer.on('open', id => {
 // Handle incoming calls
 peer.on('call', call => {
     if (currentCall) {
-        call.close(); // Only allow one call at a time
+        call.close();
         return;
     }
     
@@ -78,17 +76,14 @@ peer.on('call', call => {
         toggleButtons(true);
     });
     
-    call.on('close', () => {
-        endCall();
-    });
-    
+    call.on('close', () => endCall());
     call.on('error', err => {
         console.error('Call error:', err);
         endCall();
     });
 });
 
-// Generate link
+// Button event listeners
 generateLinkBtn.addEventListener('click', () => {
     const callLink = `${window.location.origin}?call=${peerId}`;
     linkDisplay.textContent = callLink;
@@ -98,14 +93,75 @@ generateLinkBtn.addEventListener('click', () => {
     status.textContent = 'Waiting for global participants...';
 });
 
-// Copy link to clipboard
 copyLinkBtn.addEventListener('click', () => {
     navigator.clipboard.writeText(linkDisplay.textContent)
         .then(() => alert('Link copied! Share it worldwide!'))
         .catch(err => console.error('Failed to copy:', err));
 });
 
-// End call
+videoOffBtn.addEventListener('click', () => {
+    if (localStream) {
+        localStream.getVideoTracks()[0].enabled = false;
+        videoOffBtn.style.display = 'none';
+        videoOnBtn.style.display = 'inline-block';
+    }
+});
+
+videoOnBtn.addEventListener('click', () => {
+    if (localStream) {
+        localStream.getVideoTracks()[0].enabled = true;
+        videoOffBtn.style.display = 'inline-block';
+        videoOnBtn.style.display = 'none';
+    }
+});
+
+micOffBtn.addEventListener('click', () => {
+    if (localStream) {
+        localStream.getAudioTracks()[0].enabled = false;
+        micOffBtn.style.display = 'none';
+        micOnBtn.style.display = 'inline-block';
+    }
+});
+
+micOnBtn.addEventListener('click', () => {
+    if (localStream) {
+        localStream.getAudioTracks()[0].enabled = true;
+        micOffBtn.style.display = 'inline-block';
+        micOnBtn.style.display = 'none';
+    }
+});
+
+screenShareBtn.addEventListener('click', async () => {
+    try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: true
+        });
+        
+        localStream.getVideoTracks()[0].stop();
+        localStream = screenStream;
+        localVideo.srcObject = screenStream;
+        
+        if (currentCall) {
+            const videoTrack = screenStream.getVideoTracks()[0];
+            currentCall.peerConnection.getSenders()
+                .find(sender => sender.track.kind === 'video')
+                .replaceTrack(videoTrack);
+        }
+        
+        isScreenSharing = true;
+        screenShareBtn.style.display = 'none';
+        stopScreenShareBtn.style.display = 'inline-block';
+        
+        screenStream.getVideoTracks()[0].onended = () => stopScreenSharing();
+    } catch (err) {
+        console.error('Screen share error:', err);
+        status.textContent = 'Failed to start screen sharing';
+    }
+});
+
+stopScreenShareBtn.addEventListener('click', stopScreenSharing);
+
 endBtn.addEventListener('click', endCall);
 
 function joinCall(remoteId) {
@@ -119,16 +175,12 @@ function joinCall(remoteId) {
         toggleButtons(true);
     });
     
-    call.on('close', () => {
-        endCall();
-    });
-    
+    call.on('close', () => endCall());
     call.on('error', err => {
         console.error('Call error:', err);
         endCall();
     });
     
-    // Timeout if no connection after 30 seconds
     setTimeout(() => {
         if (!remoteVideo.srcObject) {
             status.textContent = 'Connection timeout';
@@ -137,10 +189,32 @@ function joinCall(remoteId) {
     }, 30000);
 }
 
-function endCall() {
+async function stopScreenSharing() {
+    if (!isScreenSharing) return;
+    
+    localStream.getTracks().forEach(track => track.stop());
+    const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+    });
+    
+    localStream = newStream;
+    localVideo.srcObject = newStream;
+    
     if (currentCall) {
-        currentCall.close();
+        const videoTrack = newStream.getVideoTracks()[0];
+        currentCall.peerConnection.getSenders()
+            .find(sender => sender.track.kind === 'video')
+            .replaceTrack(videoTrack);
     }
+    
+    isScreenSharing = false;
+    screenShareBtn.style.display = 'inline-block';
+    stopScreenShareBtn.style.display = 'none';
+}
+
+function endCall() {
+    if (currentCall) currentCall.close();
     currentCall = null;
     remoteVideo.srcObject = null;
     toggleButtons(false);
@@ -170,7 +244,6 @@ peer.on('error', err => {
     }
 });
 
-// Monitor connection state
 peer.on('disconnected', () => {
     status.textContent = 'Disconnected from signaling server';
     endCall();
